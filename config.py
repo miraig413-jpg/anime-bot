@@ -29,7 +29,7 @@ STREAM_SITE_SEARCH = "/search?keyword="   # to'liq havola: {BASE}{SEARCH}{anime 
 #    2) Profil > API Consumers bo'limidan API kalit oling
 #    3) Kalitni quyiga yoki OPENSUBTITLES_API_KEY env o'zgaruvchiga qo'ying
 OPENSUBTITLES_API_URL = "https://api.opensubtitles.com/api/v1"
-OPENSUBTITLES_API_KEY = os.getenv("OPENSUBTITLES_API_KEY", "")  # ⬅️ bu yerga kalitingizni qo'ying
+OPENSUBTITLES_API_KEY = os.getenv("OPENSUBTITLES_API_KEY", "eWnvxEZXSPPbiogOmroZFh4MEEnaoNSH")
 OPENSUBTITLES_APP = "AnimeUniverseBot v3.2"  # OpenSubtitles talab qiladigan User-Agent
 
 # 🔑 (Ixtiyoriy) OpenSubtitles login — yuklab olish limitini oshiradi.
