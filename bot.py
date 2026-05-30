@@ -12,6 +12,7 @@ Tuzatilgan barcha xatolar:
 
 import logging
 import asyncio
+import io
 import re
 from datetime import datetime, timedelta
 
@@ -29,6 +30,7 @@ from config import BOT_TOKEN, ADMIN_IDS
 from database import Database
 from anime_api import AnimeAPI
 from messages import Messages
+from streaming import AniwaveClient, OpenSubtitlesClient
 
 logging.basicConfig(
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
@@ -43,6 +45,8 @@ logger = logging.getLogger(__name__)
 db = Database()
 api = AnimeAPI()
 msg = Messages()
+aniwave = AniwaveClient()
+opensubs = OpenSubtitlesClient()
 
 # ──────────────────────────────────────────
 #  KONSTANTALAR
@@ -544,6 +548,8 @@ def _anime_kb(user_id: int, anime_id: int) -> list:
     wch_txt = "🗑 Ko'rilganlardan o'chirish" if is_wch else "✅ Ko'rilganlarga qo'shish"
     wch_cb  = f"wdel|{anime_id}" if is_wch else f"wadd|{anime_id}"
     return [
+        [InlineKeyboardButton("▶️ Ko'rish", callback_data=f"watch|{anime_id}"),
+         InlineKeyboardButton("📥 Subtitle", callback_data=f"subs|{anime_id}")],
         [InlineKeyboardButton(fav_txt, callback_data=fav_cb)],
         [InlineKeyboardButton(wch_txt, callback_data=wch_cb)],
         [InlineKeyboardButton("🎯 Tavsiyalar", callback_data=f"recs|{anime_id}")],
@@ -551,6 +557,11 @@ def _anime_kb(user_id: int, anime_id: int) -> list:
          InlineKeyboardButton("🎲 Tasodifiy", callback_data="random")],
         [InlineKeyboardButton("🏠 Bosh Menu", callback_data="home")],
     ]
+
+def _search_title(a: dict) -> str:
+    """Tashqi qidiruv (Aniwave / OpenSubtitles) uchun eng mos sarlavha."""
+    tl = a.get("title") or {}
+    return tl.get("english") or tl.get("romaji") or tl.get("native") or "anime"
 
 async def build_recs(anime_id: int):
     recs = await api.get_recommendations_for_anime(anime_id)
@@ -824,6 +835,70 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             anime_id = int(d[5:])
             t, kb = await build_recs(anime_id)
             await edit_or_answer(q, t, kb)
+
+        # ── Ko'rish (Aniwave) ──
+        elif d.startswith("watch|"):
+            anime_id = int(d[6:])
+            await q.answer("▶️ Aniwave'da qidirilmoqda...")
+            anime = await api.get_anime_details(anime_id)
+            if not anime:
+                await q.answer("❌ Anime topilmadi!", show_alert=True)
+                return
+            title = _search_title(anime)
+            res = await aniwave.resolve(title)
+            back = [InlineKeyboardButton("◀️ Orqaga", callback_data=f"det|{anime_id}")]
+            if res.get("watch_url"):
+                t = (f"▶️ <b>{title}</b>\n\n"
+                     f"🔗 Aniwave'da ko'rish havolasi tayyor:\n{res['watch_url']}\n\n"
+                     f"<i>Havola ochilmasa, «Qidiruv» tugmasidan foydalaning.</i>")
+                kb = [[InlineKeyboardButton("▶️ Aniwave'da ochish", url=res["watch_url"])],
+                      [InlineKeyboardButton("🔎 Qidiruv", url=res["search_url"])], back]
+            else:
+                t = (f"🔎 <b>{title}</b>\n\n"
+                     f"To'g'ridan-to'g'ri havola topilmadi.\n"
+                     f"Quyidagi tugma orqali Aniwave qidiruvini oching:")
+                kb = [[InlineKeyboardButton("🔎 Aniwave'da qidirish", url=res["search_url"])], back]
+            await q.message.chat.send_message(
+                t, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
+
+        # ── Subtitle (OpenSubtitles) ──
+        elif d.startswith("subs|"):
+            anime_id = int(d[5:])
+            if not opensubs.configured():
+                await q.answer(
+                    "⚠️ Subtitle xizmati sozlanmagan.\nAdmin OPENSUBTITLES_API_KEY ni qo'shishi kerak.",
+                    show_alert=True)
+                return
+            await q.answer("📥 Subtitle qidirilmoqda...")
+            anime = await api.get_anime_details(anime_id)
+            if not anime:
+                await q.answer("❌ Anime topilmadi!", show_alert=True)
+                return
+            title = _search_title(anime)
+            status_msg = await q.message.chat.send_message(
+                f"📥 <b>{title}</b>\n⏳ Inglizcha subtitle qidirilmoqda...",
+                parse_mode=ParseMode.HTML)
+            res = await opensubs.fetch_subtitle(title, language="en")
+            if res.get("ok"):
+                bio = io.BytesIO(res["content"])
+                bio.name = res["filename"]
+                cap = f"📥 <b>{title}</b>\n🇬🇧 Inglizcha subtitle (.srt)"
+                if res.get("remaining") is not None:
+                    cap += f"\n♻️ Qolgan kunlik yuklamalar: {res['remaining']}"
+                try:
+                    await q.message.chat.send_document(
+                        document=bio, filename=res["filename"],
+                        caption=cap, parse_mode=ParseMode.HTML)
+                    await status_msg.delete()
+                except Exception as e:
+                    logger.warning(f"send_document xato: {e}")
+                    await status_msg.edit_text("❌ Faylni yuborishda xatolik yuz berdi.")
+            else:
+                emoji = {"no_key": "⚠️", "not_found": "😔",
+                         "quota": "🚫", "error": "❌"}.get(res.get("reason"), "❌")
+                await status_msg.edit_text(
+                    f"{emoji} {res.get('message', 'Xatolik yuz berdi.')}",
+                    parse_mode=ParseMode.HTML)
 
         # ── Sevimlilar ──
         elif d == "favs":
