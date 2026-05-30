@@ -14,18 +14,28 @@ DATABASE_NAME = "anime_bot.db"
 # 🌐 AniList API URL (bepul, API kalit kerak emas)
 ANILIST_API_URL = "https://graphql.anilist.co"
 
-# ▶️ Aniwave sayti (ko'rish havolasi uchun bazaviy domen)
-#    Domen o'zgarsa shu yerni yangilang (masalan: https://aniwave.to)
-ANIWAVE_BASE = "https://aniwave.ac"
+import os
+
+# ▶️ Bepul striming sayti (ko'rish/qidiruv havolasi uchun)
+#    DIQQAT: AniWave (aniwave.ac) 2024-yil avgustda butunlay yopilgan!
+#    Shu sababli endi jonli vorisi — HiAnime ishlatiladi.
+#    Sayt yoki domen o'zgarsa, faqat shu yerni yangilang.
+STREAM_SITE_NAME = "HiAnime"
+STREAM_SITE_BASE = "https://hianime.to"
+STREAM_SITE_SEARCH = "/search?keyword="   # to'liq havola: {BASE}{SEARCH}{anime nomi}
 
 # 📥 OpenSubtitles API (subtitle yuklash uchun)
 #    1) https://www.opensubtitles.com saytida ro'yxatdan o'ting
 #    2) Profil > API Consumers bo'limidan API kalit oling
 #    3) Kalitni quyiga yoki OPENSUBTITLES_API_KEY env o'zgaruvchiga qo'ying
-import os
 OPENSUBTITLES_API_URL = "https://api.opensubtitles.com/api/v1"
 OPENSUBTITLES_API_KEY = os.getenv("OPENSUBTITLES_API_KEY", "")  # ⬅️ bu yerga kalitingizni qo'ying
 OPENSUBTITLES_APP = "AnimeUniverseBot v3.2"  # OpenSubtitles talab qiladigan User-Agent
+
+# 🔑 (Ixtiyoriy) OpenSubtitles login — yuklab olish limitini oshiradi.
+#    Bo'sh qoldirilsa, anonim (Api-Key) rejimida ishlaydi (kunlik limit kichik).
+OPENSUBTITLES_USERNAME = os.getenv("OPENSUBTITLES_USERNAME", "")
+OPENSUBTITLES_PASSWORD = os.getenv("OPENSUBTITLES_PASSWORD", "")
 
 # ⏰ Bildirishnoma vaqti
 NOTIFICATION_HOUR = 9

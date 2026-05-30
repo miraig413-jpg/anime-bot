@@ -35,6 +35,8 @@ MEDIA_FIELDS = """
     }
     tags { name rank }
     trailer { site id }
+    externalLinks { url site type language }
+    streamingEpisodes { title url site }
     siteUrl
 """
 
