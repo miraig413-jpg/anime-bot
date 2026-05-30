@@ -96,6 +96,17 @@ def until(sec: int) -> str:
     d, h, m = sec // 86400, (sec % 86400) // 3600, (sec % 3600) // 60
     return f"{d}k {h}s" if d > 0 else (f"{h}s {m}d" if h > 0 else f"{m}d")
 
+def cb(prefix: str, value: str, limit: int = 64) -> str:
+    """
+    callback_data ni Telegram'ning 64 baytlik chekloviga moslaydi.
+    Kirill/emoji kabi ko'p baytli belgilarni hisobga oladi va buzmaydi.
+    """
+    budget = limit - len(prefix.encode("utf-8"))
+    if budget <= 0:
+        return prefix[:limit]
+    enc = value.encode("utf-8")[:budget]
+    return prefix + enc.decode("utf-8", "ignore")
+
 def home():
     return [[InlineKeyboardButton("🏠 Bosh Menu", callback_data="home")]]
 
@@ -123,30 +134,63 @@ def main_kb():
 # Rasm yubormaymiz — faqat text+caption usuli
 # ──────────────────────────────────────────
 
+async def _send_fresh(query, text: str, markup: InlineKeyboardMarkup, photo: str = None):
+    """
+    Eski xabarni o'chirib, yangisini yuboradi.
+    Telegram matnli <-> rasmli xabarlarni edit qilishga ruxsat bermaydi,
+    shuning uchun xabar turi o'zgarganda uni qaytadan yaratamiz.
+    """
+    chat = query.message.chat
+    try:
+        await query.message.delete()
+    except Exception:
+        pass  # eski xabarni o'chirib bo'lmasa ham davom etamiz
+    if photo:
+        try:
+            await chat.send_photo(
+                photo=photo, caption=text[:1024],
+                reply_markup=markup, parse_mode=ParseMode.HTML
+            )
+            return
+        except Exception as e:
+            logger.warning(f"send_photo failed, matnga o'tilyapti: {e}")
+    await chat.send_message(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+
 async def edit_or_answer(query, text: str, keyboard: list, photo: str = None):
     """
-    Xabarni edit qiladi yoki yangi yuboradi.
-    Photo bo'lsa: edit_message_media (eski message ID saqlanadi).
-    Bu 'delete + reply_photo => BadRequest' muammosini yo'q qiladi.
+    Xabarni mavjud bo'lsa edit qiladi, aks holda qaytadan yuboradi.
+
+    Telegram matnli xabarni rasmli xabarga (yoki aksincha) edit qilishga
+    ruxsat bermaydi. Shu sababli xabar turi o'zgarganda yoki edit imkonsiz
+    bo'lganda xabarni o'chirib qaytadan yuboramiz — bu barcha tugmalar
+    har qanday holatda ishlashini ta'minlaydi.
     """
     markup = InlineKeyboardMarkup(keyboard)
+    is_photo_msg = bool(getattr(query.message, "photo", None))
     try:
-        if photo:
-            try:
-                # Rasmli xabar bo'lsa edit_message_media
-                media = InputMediaPhoto(
-                    media=photo,
-                    caption=text[:1024],
-                    parse_mode=ParseMode.HTML
-                )
-                await query.edit_message_media(media=media, reply_markup=markup)
-                return
-            except BadRequest:
-                pass  # Rasmli emas => oddiy text edit
+        if photo and is_photo_msg:
+            # rasm -> rasm: caption va tugmalarni o'rnida yangilaymiz
+            media = InputMediaPhoto(
+                media=photo, caption=text[:1024], parse_mode=ParseMode.HTML
+            )
+            await query.edit_message_media(media=media, reply_markup=markup)
+            return
+        if (photo and not is_photo_msg) or (not photo and is_photo_msg):
+            # xabar turi o'zgaryapti: edit imkonsiz, qaytadan yaratamiz
+            await _send_fresh(query, text, markup, photo)
+            return
+        # matn -> matn
         await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     except BadRequest as e:
-        if "Message is not modified" not in str(e):
-            logger.warning(f"edit_or_answer BadRequest: {e}")
+        if "Message is not modified" in str(e):
+            return
+        # boshqa edit xatosida xabarni qaytadan yaratamiz
+        logger.info(f"edit muvaffaqiyatsiz ({e}); xabar qayta yaratilyapti")
+        try:
+            await _send_fresh(query, text, markup, photo)
+        except Exception as e2:
+            logger.warning(f"qayta yaratish ham muvaffaqiyatsiz: {e2}")
 
 # ──────────────────────────────────────────
 #  KOMANDA HANDLERLARI
@@ -581,7 +625,7 @@ def build_history(user_id: int):
     kb = []
     for i, q in enumerate(history, 1):
         t += f"{i}. <code>{q}</code>\n"
-        kb.append([InlineKeyboardButton(f"🔍 {q[:42]}", callback_data=f"redo|{q[:50]}")])
+        kb.append([InlineKeyboardButton(f"🔍 {q[:42]}", callback_data=cb("redo|", q))])
     kb.extend(home())
     return t, kb
 
