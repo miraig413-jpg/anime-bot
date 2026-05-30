@@ -13,6 +13,7 @@ Tuzatilgan barcha xatolar:
 import logging
 import asyncio
 import io
+import html
 import re
 from datetime import datetime, timedelta
 
@@ -30,7 +31,7 @@ from config import BOT_TOKEN, ADMIN_IDS
 from database import Database
 from anime_api import AnimeAPI
 from messages import Messages
-from streaming import AniwaveClient, OpenSubtitlesClient
+from streaming import StreamSiteClient, OpenSubtitlesClient
 
 logging.basicConfig(
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 db = Database()
 api = AnimeAPI()
 msg = Messages()
-aniwave = AniwaveClient()
+stream = StreamSiteClient()
 opensubs = OpenSubtitlesClient()
 
 # ──────────────────────────────────────────
@@ -792,28 +793,49 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             t, kb = await build_recs(anime_id)
             await edit_or_answer(q, t, kb)
 
-        # ── Ko'rish (Aniwave) ──
+        # ── Ko'rish (rasmiy striming havolalari + jonli sayt qidiruvi) ──
         elif d.startswith("watch|"):
             anime_id = int(d[6:])
-            await q.answer("▶️ Aniwave'da qidirilmoqda...")
             anime = await api.get_anime_details(anime_id)
             if not anime:
-                await q.answer("❌ Anime topilmadi!", show_alert=True)
+                await q.message.chat.send_message("❌ Anime topilmadi!")
                 return
             title = _search_title(anime)
-            res = await aniwave.resolve(title)
-            back = [InlineKeyboardButton("◀️ Orqaga", callback_data=f"det|{anime_id}")]
-            if res.get("watch_url"):
-                t = (f"▶️ <b>{title}</b>\n\n"
-                     f"🔗 Aniwave'da ko'rish havolasi tayyor:\n{res['watch_url']}\n\n"
-                     f"<i>Havola ochilmasa, «Qidiruv» tugmasidan foydalaning.</i>")
-                kb = [[InlineKeyboardButton("▶️ Aniwave'da ochish", url=res["watch_url"])],
-                      [InlineKeyboardButton("🔎 Qidiruv", url=res["search_url"])], back]
+            safe_title = html.escape(title)
+
+            # 1) AniList'dagi RASMIY striming havolalari (Crunchyroll, Netflix, HIDIVE...)
+            links = anime.get("externalLinks") or []
+            streaming = [l for l in links
+                         if (l.get("type") == "STREAMING") and l.get("url")]
+            kb, row = [], []
+            for l in streaming[:8]:
+                site = (l.get("site") or "Watch")[:20]
+                row.append(InlineKeyboardButton(f"▶️ {site}", url=l["url"]))
+                if len(row) == 2:
+                    kb.append(row); row = []
+            if row:
+                kb.append(row)
+
+            # 2) Bepul striming sayti (jonli) — qidiruv havolasi
+            kb.append([InlineKeyboardButton(
+                f"🔎 {stream.name}'da qidirish", url=stream.search_url(title))])
+
+            # 3) Treyler (agar bo'lsa)
+            tr = anime.get("trailer") or {}
+            if tr.get("site") == "youtube" and tr.get("id"):
+                kb.append([InlineKeyboardButton(
+                    "🎬 Treyler (YouTube)", url=f"https://youtu.be/{tr['id']}")])
+
+            kb.append([InlineKeyboardButton("◀️ Orqaga", callback_data=f"det|{anime_id}")])
+
+            if streaming:
+                t = (f"▶️ <b>{safe_title}</b>\n\n"
+                     f"✅ Rasmiy striming platformalari topildi.\n"
+                     f"Quyidagi tugmalardan birini tanlang:")
             else:
-                t = (f"🔎 <b>{title}</b>\n\n"
-                     f"To'g'ridan-to'g'ri havola topilmadi.\n"
-                     f"Quyidagi tugma orqali Aniwave qidiruvini oching:")
-                kb = [[InlineKeyboardButton("🔎 Aniwave'da qidirish", url=res["search_url"])], back]
+                t = (f"▶️ <b>{safe_title}</b>\n\n"
+                     f"ℹ️ Rasmiy striming havolasi topilmadi.\n"
+                     f"<b>{stream.name}</b> saytida bepul qidirib ko'ring:")
             await q.message.chat.send_message(
                 t, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
 
@@ -821,24 +843,26 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif d.startswith("subs|"):
             anime_id = int(d[5:])
             if not opensubs.configured():
-                await q.answer(
-                    "⚠️ Subtitle xizmati sozlanmagan.\nAdmin OPENSUBTITLES_API_KEY ni qo'shishi kerak.",
-                    show_alert=True)
+                await q.message.chat.send_message(
+                    "⚠️ <b>Subtitle xizmati sozlanmagan.</b>\n\n"
+                    "Admin <code>OPENSUBTITLES_API_KEY</code> ni config.py yoki "
+                    "muhit o'zgaruvchisiga qo'shishi kerak.",
+                    parse_mode=ParseMode.HTML)
                 return
-            await q.answer("📥 Subtitle qidirilmoqda...")
             anime = await api.get_anime_details(anime_id)
             if not anime:
-                await q.answer("❌ Anime topilmadi!", show_alert=True)
+                await q.message.chat.send_message("❌ Anime topilmadi!")
                 return
             title = _search_title(anime)
+            safe_title = html.escape(title)
             status_msg = await q.message.chat.send_message(
-                f"📥 <b>{title}</b>\n⏳ Inglizcha subtitle qidirilmoqda...",
+                f"📥 <b>{safe_title}</b>\n⏳ Inglizcha subtitle qidirilmoqda...",
                 parse_mode=ParseMode.HTML)
             res = await opensubs.fetch_subtitle(title, language="en")
             if res.get("ok"):
                 bio = io.BytesIO(res["content"])
                 bio.name = res["filename"]
-                cap = f"📥 <b>{title}</b>\n🇬🇧 Inglizcha subtitle (.srt)"
+                cap = f"📥 <b>{safe_title}</b>\n🇬🇧 Inglizcha subtitle (.srt)"
                 if res.get("remaining") is not None:
                     cap += f"\n♻️ Qolgan kunlik yuklamalar: {res['remaining']}"
                 try:
@@ -853,7 +877,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 emoji = {"no_key": "⚠️", "not_found": "😔",
                          "quota": "🚫", "error": "❌"}.get(res.get("reason"), "❌")
                 await status_msg.edit_text(
-                    f"{emoji} {res.get('message', 'Xatolik yuz berdi.')}",
+                    f"{emoji} {html.escape(res.get('message', 'Xatolik yuz berdi.'))}",
                     parse_mode=ParseMode.HTML)
 
         # ── Sevimlilar ──
