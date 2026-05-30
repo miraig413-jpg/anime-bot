@@ -34,8 +34,8 @@ OPENSUBTITLES_APP = "AnimeUniverseBot v3.2"  # OpenSubtitles talab qiladigan Use
 
 # 🔑 (Ixtiyoriy) OpenSubtitles login — yuklab olish limitini oshiradi.
 #    Bo'sh qoldirilsa, anonim (Api-Key) rejimida ishlaydi (kunlik limit kichik).
-OPENSUBTITLES_USERNAME = os.getenv("OPENSUBTITLES_USERNAME", "")
-OPENSUBTITLES_PASSWORD = os.getenv("OPENSUBTITLES_PASSWORD", "")
+OPENSUBTITLES_USERNAME = os.getenv("OPENSUBTITLES_USERNAME", "zeno006")
+OPENSUBTITLES_PASSWORD = os.getenv("OPENSUBTITLES_PASSWORD", "Y/GpM55HA89nK@w")
 
 # ⏰ Bildirishnoma vaqti
 NOTIFICATION_HOUR = 9
